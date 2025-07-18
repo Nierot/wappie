@@ -17,6 +17,7 @@ import (
 )
 
 var mh *MessageHandler 
+var logLevel string = "INFO"
 
 func eventHandler(evt interface{}) {
 	switch v := evt.(type) {
@@ -26,15 +27,9 @@ func eventHandler(evt interface{}) {
 }
 
 func main() {
-	// |------------------------------------------------------------------------------------------------------|
-	// | NOTE: You must also import the appropriate DB connector, e.g. github.com/mattn/go-sqlite3 for SQLite |
-	// |------------------------------------------------------------------------------------------------------|
 	log.Println("starting...")
-	mh = &MessageHandler{
-		Name: "Messages",
-	}
 
-	dbLog := waLog.Stdout("Database", "DEBUG", true)
+	dbLog := waLog.Stdout("Database", logLevel, true)
 	ctx := context.Background()
 	container, err := sqlstore.New(ctx, "sqlite3", "file:store.db?_foreign_keys=on", dbLog)
 	if err != nil {
@@ -45,7 +40,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	clientLog := waLog.Stdout("Client", "DEBUG", true)
+	clientLog := waLog.Stdout("Client", logLevel, true)
 	client := whatsmeow.NewClient(deviceStore, clientLog)
 	client.AddEventHandler(eventHandler)
 
@@ -69,6 +64,11 @@ func main() {
 	} else {
 		// Already logged in, just connect
 		err = client.Connect()
+
+		mh = &MessageHandler{
+			Client: client,
+		}
+
 		if err != nil {
 			panic(err)
 		}
