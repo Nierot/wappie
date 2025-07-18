@@ -13,24 +13,29 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+//go:generate stringer -type=MessageType --linecomment
 type MessageType int
 
 const (
 	MessagePlain MessageType = iota
+	MessageExtended
 	MessageUnknown
 )
 
 type Message struct {
-	Type MessageType
-	PlainMessage string
 	DisplayName string
-	ID string
+	MessageID string
+	SenderID string
+	ChatID string
 	ReceivedAt string
 	IsGroup bool
+	Type MessageType
+	PlainMessage string
 }
 
 func (m *Message) String() string {
-	str := "*received message:*\n"
+	// str := "*received message:*\n"
+	str := ""
 
 	mt := reflect.ValueOf(m).Elem()
 	t := mt.Type()
@@ -40,9 +45,14 @@ func (m *Message) String() string {
 		value := mt.Field(i)
 		val := value.Interface()
 
-		if (val == nil) {
+		if (val == nil || val == "") {
 			val = "unset"
 		}
+
+		if valType := reflect.TypeOf(val); valType.String() == "MessageType" {
+			val = valType.Elem().String()
+		}
+
 		str += fmt.Sprintf("%s: %v", field.Name, val)
 		if (i != mt.NumField()-1) {
 			str += "\n"
@@ -80,20 +90,20 @@ func (m *MessageHandler) Handle(e *events.Message) {
 
 	// stuur alle logs in een DM
 	m.Send(e.Info.Chat, msg.String())
+	m.MarkRead(&msg, e)
 	// En in de console
 	msg.Log()
+}
+
+func (m *MessageHandler) MarkRead(msg *Message, e *events.Message) {
+	m.Client.MarkRead([]string{msg.MessageID}, time.Now(), e.Info.Chat, e.Info.Sender, types.ReceiptTypeRead)
 }
 
 func (m *MessageHandler) MakeMessage(e *events.Message) Message {
 	ctx := context.Background()
 
-	str := ""
 	msgType := m.GetMessageType(e)
-
-	switch msgType {
-	case MessagePlain:
-		str = m.GetMessagePlaintext(e)
-	}
+	str := m.GetMessagePlaintext(e, msgType)
 
 	// In groepen en DMs is the JID anders, haal de goede op
 	jid, err := m.Client.Store.LIDs.GetLIDForPN(ctx, e.Info.Sender.ToNonAD())
@@ -106,7 +116,9 @@ func (m *MessageHandler) MakeMessage(e *events.Message) Message {
 		Type: msgType,
 		PlainMessage: str,
 		DisplayName: e.Info.PushName,
-		ID: jid.String(),
+		MessageID: e.Info.ID,
+		SenderID: jid.String(),
+		ChatID: e.Info.Chat.String(),
 		ReceivedAt: e.Info.Timestamp.Local().Format(time.DateTime),
 		IsGroup: e.Info.IsGroup,
 	}
@@ -114,27 +126,29 @@ func (m *MessageHandler) MakeMessage(e *events.Message) Message {
 	return msg
 }
 
-func (m *MessageHandler) GetMessagePlaintext(e *events.Message) string {
+func (m *MessageHandler) GetMessagePlaintext(e *events.Message, msgType MessageType) string {
 	// als reply op ander bericht: GetConversation werkt niet
 
-	fmt.Println(e.Info.PushName)
-
-	mt := reflect.TypeOf(e.Message)
-
-	fmt.Println(mt)
-
-	str := e.Message.GetConversation()
-
-	if (str == "") {
-
+	switch msgType {
+	case MessagePlain:
+		return e.Message.GetConversation()
+	case MessageExtended:
+		return e.Message.ExtendedTextMessage.GetText()
 	}
 
-	return e.Message.GetConversation()
+	return ""
 }
 
 func (m *MessageHandler) GetMessageType(e *events.Message) MessageType {
-	if e.Message.GetConversation() != "" {
+	if len(e.Message.GetConversation()) != 0 {
 		return MessagePlain
+	}
+
+	fmt.Println(e.Message)
+	fmt.Println(e.Message.ExtendedTextMessage.GetText())
+
+	if len(e.Message.ExtendedTextMessage.GetText()) != 0 {
+		return MessageExtended
 	}
 
 	return MessageUnknown
